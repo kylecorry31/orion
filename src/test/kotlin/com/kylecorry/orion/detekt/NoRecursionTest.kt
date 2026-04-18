@@ -1,19 +1,19 @@
 package com.kylecorry.orion.detekt
 
-import io.gitlab.arturbosch.detekt.rules.KotlinCoreEnvironmentTest
-import io.gitlab.arturbosch.detekt.test.compileAndLintWithContext
-import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
+import dev.detekt.api.Config
+import dev.detekt.test.lintWithContext
+import dev.detekt.test.utils.createEnvironment
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-@KotlinCoreEnvironmentTest
-class NoRecursionTest(private val env: KotlinCoreEnvironment) {
+class NoRecursionTest {
 
-    private val subject = NoRecursion(io.gitlab.arturbosch.detekt.api.Config.empty)
+    private val env = createEnvironment()
+    private val subject = NoRecursion(Config.empty)
 
     @Test
     fun `reports direct recursion`() {
-        val findings = subject.compileAndLintWithContext(
+        val findings = subject.lintWithContext(
             env,
             """
                 fun factorial(n: Int): Int {
@@ -27,7 +27,7 @@ class NoRecursionTest(private val env: KotlinCoreEnvironment) {
 
     @Test
     fun `reports indirect recursion`() {
-        val findings = subject.compileAndLintWithContext(
+        val findings = subject.lintWithContext(
             env,
             """
                 fun factorial(n: Int): Int {
@@ -46,7 +46,7 @@ class NoRecursionTest(private val env: KotlinCoreEnvironment) {
 
     @Test
     fun `does not report non-recursive function calls`() {
-        val findings = subject.compileAndLintWithContext(
+        val findings = subject.lintWithContext(
             env,
             """
                 fun helper(n: Int): Int {
@@ -64,7 +64,7 @@ class NoRecursionTest(private val env: KotlinCoreEnvironment) {
 
     @Test
     fun `does not report overload delegation`() {
-        val findings = subject.compileAndLintWithContext(
+        val findings = subject.lintWithContext(
             env,
             """
                 object Example {
@@ -84,7 +84,7 @@ class NoRecursionTest(private val env: KotlinCoreEnvironment) {
 
     @Test
     fun `does not report qualified calls`() {
-        val findings = subject.compileAndLintWithContext(
+        val findings = subject.lintWithContext(
             env,
             """
                 class Example {
@@ -107,7 +107,7 @@ class NoRecursionTest(private val env: KotlinCoreEnvironment) {
 
     @Test
     fun `does not report companion extension function calling another overload on companion`() {
-        val findings = subject.compileAndLintWithContext(
+        val findings = subject.lintWithContext(
             env,
             """
                 data class Bounds(val min: Double, val max: Double) {
@@ -129,7 +129,7 @@ class NoRecursionTest(private val env: KotlinCoreEnvironment) {
 
     @Test
     fun `does not report super calls`() {
-        val findings = subject.compileAndLintWithContext(
+        val findings = subject.lintWithContext(
             env,
             """
                 open class Base {

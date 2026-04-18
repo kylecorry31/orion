@@ -1,10 +1,10 @@
 plugins {
-    kotlin("jvm") version "2.2.21"
+    kotlin("jvm") version "2.3.0"
     id("java-library")
     id("com.vanniktech.maven.publish") version "0.35.0"
 }
 
-val versionName = "1.0.1"
+val versionName = "1.1.0"
 
 group = "com.kylecorry"
 version = versionName
@@ -14,11 +14,10 @@ repositories {
 }
 
 dependencies {
-    compileOnly("io.gitlab.arturbosch.detekt:detekt-api:1.23.8")
+    compileOnly("dev.detekt:detekt-api:2.0.0-alpha.2")
 
     testImplementation(kotlin("test"))
-    testImplementation("io.gitlab.arturbosch.detekt:detekt-test:1.23.8")
-    testImplementation("io.gitlab.arturbosch.detekt:detekt-test-utils:1.23.8")
+    testImplementation("dev.detekt:detekt-test:2.0.0-alpha.2")
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.13.4")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.13.4")
 }

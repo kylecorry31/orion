@@ -1,68 +1,60 @@
 package com.kylecorry.orion.detekt
 
-import io.gitlab.arturbosch.detekt.api.CodeSmell
-import io.gitlab.arturbosch.detekt.api.Config
-import io.gitlab.arturbosch.detekt.api.Debt
-import io.gitlab.arturbosch.detekt.api.Entity
-import io.gitlab.arturbosch.detekt.api.Issue
-import io.gitlab.arturbosch.detekt.api.Rule
-import io.gitlab.arturbosch.detekt.api.Severity
-import io.gitlab.arturbosch.detekt.api.internal.RequiresTypeResolution
-import org.jetbrains.kotlin.descriptors.CallableDescriptor
+import dev.detekt.api.Config
+import dev.detekt.api.Entity
+import dev.detekt.api.Finding
+import dev.detekt.api.RequiresAnalysisApi
+import dev.detekt.api.Rule
+import org.jetbrains.kotlin.analysis.api.analyze
+import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.psi.KtCallExpression
-import org.jetbrains.kotlin.psi.KtElement
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtNamedFunction
-import org.jetbrains.kotlin.resolve.BindingContext
-import org.jetbrains.kotlin.resolve.calls.model.ResolvedCall
 
-@RequiresTypeResolution
-class NoRecursion(config: Config) : Rule(config) {
+class NoRecursion(config: Config) : Rule(
+    config,
+    "Recursive functions are not allowed.",
+), RequiresAnalysisApi {
 
-    override val issue = Issue(
-        id = javaClass.simpleName,
-        severity = Severity.Defect,
-        description = "Recursive functions are not allowed.",
-        debt = Debt.FIVE_MINS,
+    private data class FunctionId(
+        val qualifiedName: String,
+        val receiverType: String?,
+        val parameterTypes: List<String?>,
     )
 
-    private val functionStack = ArrayDeque<CallableDescriptor>()
-    private val allDescriptors = mutableListOf<CallableDescriptor>()
-    private val callGraph = mutableMapOf<CallableDescriptor, MutableList<Pair<CallableDescriptor, KtCallExpression>>>()
+    private val functionStack = ArrayDeque<FunctionId>()
+    private val callGraph = mutableMapOf<FunctionId, MutableList<Pair<FunctionId, KtCallExpression>>>()
 
     override fun visitKtFile(file: KtFile) {
-        allDescriptors.clear()
         callGraph.clear()
         super.visitKtFile(file)
         detectIndirectRecursion()
     }
 
     override fun visitNamedFunction(function: KtNamedFunction) {
-        val functionDescriptor =
-            bindingContext[BindingContext.DECLARATION_TO_DESCRIPTOR, function] as? CallableDescriptor
-
-        if (functionDescriptor == null) {
+        val functionId = function.toFunctionId() ?: run {
             super.visitNamedFunction(function)
             return
         }
 
-        allDescriptors.add(functionDescriptor.original)
-        functionStack.addLast(functionDescriptor.original)
+        functionStack.addLast(functionId)
         super.visitNamedFunction(function)
         functionStack.removeLast()
     }
 
     override fun visitCallExpression(expression: KtCallExpression) {
         val currentFunction = functionStack.lastOrNull()
-        val calledFunction = resolveCallDescriptor(expression)
+        val calledFunction = expression.toFunctionId()
 
         if (currentFunction != null && calledFunction != null) {
             if (calledFunction == currentFunction) {
                 report(
-                    CodeSmell(
-                        issue = issue,
+                    Finding(
                         entity = Entity.from(expression),
-                        message = "Function '${currentFunction.name}' calls itself recursively.",
+                        message = "Function '${currentFunction.qualifiedName}' calls itself recursively.",
                     ),
                 )
             } else {
@@ -75,10 +67,10 @@ class NoRecursion(config: Config) : Rule(config) {
     }
 
     private fun detectIndirectRecursion() {
-        val visited = mutableSetOf<CallableDescriptor>()
-        val reportedCycles = mutableSetOf<Set<CallableDescriptor>>()
+        val visited = mutableSetOf<FunctionId>()
+        val reportedCycles = mutableSetOf<Set<FunctionId>>()
 
-        fun dfs(node: CallableDescriptor, path: MutableList<CallableDescriptor>, inPath: MutableMap<CallableDescriptor, Int>) {
+        fun dfs(node: FunctionId, path: MutableList<FunctionId>, inPath: MutableMap<FunctionId, Int>) {
             if (node in inPath) {
                 val cycleStart = inPath[node]!!
                 val cycle = path.subList(cycleStart, path.size).toSet()
@@ -87,10 +79,9 @@ class NoRecursion(config: Config) : Rule(config) {
                     val callExpr = callGraph[caller]?.firstOrNull { it.first == node }?.second
                     if (callExpr != null) {
                         report(
-                            CodeSmell(
-                                issue = issue,
+                            Finding(
                                 entity = Entity.from(callExpr),
-                                message = "Indirect recursion detected involving '${node.name}'.",
+                                message = "Indirect recursion detected involving '${node.qualifiedName}'.",
                             ),
                         )
                     }
@@ -101,28 +92,54 @@ class NoRecursion(config: Config) : Rule(config) {
             visited.add(node)
             inPath[node] = path.size
             path.add(node)
-            for ((neighbor, _) in callGraph[node] ?: emptyList()) {
-                dfs(neighbor, path, inPath)
+            for ((callee, _) in callGraph[node] ?: emptyList()) {
+                dfs(callee, path, inPath)
             }
             path.removeLast()
             inPath.remove(node)
         }
 
-        for (descriptor in allDescriptors) {
-            if (descriptor !in visited) {
-                dfs(descriptor, mutableListOf(), mutableMapOf())
+        for (fn in callGraph.keys.toSet()) {
+            if (fn !in visited) {
+                dfs(fn, mutableListOf(), mutableMapOf())
             }
         }
     }
 
-    private fun resolveCallDescriptor(expression: KtCallExpression): CallableDescriptor? {
-        val resolvedCall = callUtilMethod.invoke(null, expression, bindingContext) as? ResolvedCall<*>
-        return resolvedCall?.resultingDescriptor?.original
+    private fun KtNamedFunction.toFunctionId(): FunctionId? {
+        val name = fqName?.asString() ?: this.name ?: return null
+        return analyze(this) {
+            FunctionId(
+                qualifiedName = name,
+                receiverType = receiverTypeReference?.type?.toStableString(),
+                parameterTypes = valueParameters.map { parameter ->
+                    if (parameter.isVarArg) {
+                        "vararg ${parameter.returnType.arrayElementType?.toStableString()}"
+                    } else {
+                        parameter.returnType.toStableString()
+                    }
+                },
+            )
+        }
     }
 
-    private companion object {
-        val callUtilMethod =
-            Class.forName("org.jetbrains.kotlin.resolve.calls.callUtil.CallUtilKt")
-                .getMethod("getResolvedCall", KtElement::class.java, BindingContext::class.java)
+    private fun KtCallExpression.toFunctionId(): FunctionId? = analyze(this) {
+        val symbol = resolveToCall()?.singleFunctionCallOrNull()?.symbol as? KaFunctionSymbol ?: return@analyze null
+        FunctionId(
+            qualifiedName = symbol.callableId?.asSingleFqName()?.asString()
+                ?: calleeExpression?.text
+                ?: return@analyze null,
+            receiverType = symbol.receiverParameter?.returnType?.toStableString(),
+            parameterTypes = symbol.valueParameters.map { parameter ->
+                if (parameter.isVararg) {
+                    "vararg ${parameter.returnType.toStableString()}"
+                } else {
+                    parameter.returnType.toStableString()
+                }
+            },
+        )
     }
+
+    private fun KaType.toStableString(): String =
+        toString().replace('/', '.').removeSuffix("!")
 }
