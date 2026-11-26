@@ -18,4 +18,6 @@ Enable the rule in your `detekt.yml`:
 orion:
   NoRecursion:
     active: true
+  WhyComment:
+    active: true
 ```

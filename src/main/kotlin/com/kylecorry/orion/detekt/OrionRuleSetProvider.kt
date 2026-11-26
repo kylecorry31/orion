@@ -8,6 +8,6 @@ class OrionRuleSetProvider : RuleSetProvider {
     override val ruleSetId = RuleSetId("orion")
 
     override fun instance(): RuleSet {
-        return RuleSet(ruleSetId, listOf(::NoRecursion))
+        return RuleSet(ruleSetId, listOf(::NoRecursion, ::WhyComment))
     }
 }
