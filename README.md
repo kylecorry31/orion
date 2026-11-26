@@ -4,11 +4,15 @@
 
 ## Usage
 
-Add the published artifact to your Detekt plugin configuration:
+Available on [JitPack](https://jitpack.io/#kylecorry31/orion). Add it to your Detekt plugin configuration:
 
 ```kotlin
+repositories {
+    maven { url = uri("https://jitpack.io") }
+}
+
 dependencies {
-    detektPlugins("com.kylecorry:orion:<version>")
+    detektPlugins("com.github.kylecorry31:orion:<version>")
 }
 ```
 
